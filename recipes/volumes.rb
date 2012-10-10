@@ -1,7 +1,6 @@
 aws = data_bag_item('aws', 'main')
 
 node[:ebs][:volumes].each do |mount_point, options|
-  Chef::Log.info("EBS VOLUME: #{options[:device]} && #{options[:size]}")
   if !options[:device] && options[:size]
     existing_devices = Dir.glob('/dev/xvd?')
     if !existing_devices.empty?
@@ -21,9 +20,12 @@ node[:ebs][:volumes].each do |mount_point, options|
       end
       availability_zone node['ec2']['availability_zone']
       action :nothing
+      timeout 5*60# 5 mins, default is 3
     end
-    
-    Chef::Log.info("EBS VOLUME: volume_id=#{node['aws']['ebs_volume'][vol.name]['volume_id']}")
+
+    vol.run_action(:create)
+    vol.run_action(:attach)
+
     if options[:name] or options[:tags]
       aws_resource_tag node['aws']['ebs_volume'][vol.name]['volume_id'] do
         aws_access_key aws['aws_access_key_id']
@@ -37,8 +39,6 @@ node[:ebs][:volumes].each do |mount_point, options|
       end
     end
 
-    vol.run_action(:create)
-    vol.run_action(:attach)
     node.set[:ebs][:volumes][mount_point][:device] = "/dev/xvd#{devid}"
     node.save
   end
@@ -47,8 +47,8 @@ end
 node[:ebs][:volumes].each do |mount_point, options|
   execute 'mkfs' do
     command "mkfs -t #{options[:fstype]} #{options[:device]}"
-    # I think this ensures we only format the volume if it's not already
     not_if do
+      # I think this ensures we only format the volume if it's not already formatted
       BlockDevice.wait_for(options[:device])
       system("blkid -s TYPE -o value #{options[:device]}")
     end
